@@ -811,7 +811,9 @@ fn option_values_live_value_present_for_110() {
     // 123 -> 124: +1 for `globalarrayanchor` (live_field = global_array_anchor).
     // 124 -> 126: +2 for `wideslice` and `devectorize`.
     // 127 -> 128: +1 for `calleepopframe` (live_field = callee_pop_frame).
-    assert_eq!(with_live, 128);
+    // 128 -> 127: -1 for `bejoin`, now a mode (`off|evidence|on`) over an enum
+    // field with no `live_field`.
+    assert_eq!(with_live, 127);
 }
 
 #[test]

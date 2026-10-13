@@ -2076,7 +2076,9 @@ mod tests {
         // (GH-299)
         // and kuna-thumbswitch / the Listing walk reads a Thumb tbb/tbh switch
         // table (GH-299)
-        assert_eq!(count, 516, "corpus file count drifted");
+        // and kuna-bejoin-evidence, -sparc, -armeb / a big-endian pair joins
+        // high word first on proof (GH-904)
+        assert_eq!(count, 519, "corpus file count drifted");
     }
 
     /// ~20 representative SLEIGH spec files across varied processors
