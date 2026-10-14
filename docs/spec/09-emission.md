@@ -1295,6 +1295,53 @@ bodies at `-O0` and `-O2` with strict aliasing and UBSan, including unaligned
 transfers, overlapping stores, signed reads, const sources, both ARM endian
 variants and an unchanged named-struct control.
 
+**Typed pointer partial accesses (kuna `partialaccess`, default `off`, on in
+`aggressive`, `fast` and at every `auto` size).** Everywhere else the walk ends
+on the artificial member, which is Ghidra's notation and not C: `v1._4_2_ ==
+2`. With the option on, `printc.rs (PrintC::push_partial_symbol_ir)` takes the
+trailing `._<off>_<size>_` entry off the member stack and wraps the remaining
+path in the pointer access it describes (`printc.rs
+(PrintC::push_piece_open)`, `kuna_partialaccess.rs (Piece::plan)`):
+`((T *)&v1)[k]` when the offset is a multiple of the access width, with `k`
+the offset divided by the width; `*(T *)&v1` at offset 0; `*(T *)((char *)&v1
++ off)` at an unaligned offset; `*(T *)&buf[off]`, and `*(T *)buf` at offset 0,
+when the walk took the bytes out of a byte array (a `char[16]` local, a
+synthesized record's `undefined1` filler), whose subscripts already count
+bytes, as IDA prints `*(_DWORD *)&buf[8]`; the bare array for all of an array
+wider than any C scalar (the sixteen bytes of a vector bank or register-pair
+container, `v30 = 0;`); and `((char *)&v1)[off]` when the caller asked
+for the address of a position inside the symbol (the `sz == 0` request of the
+spacebase arm, which wraps the result in `&`). The first form is the spelling
+the cast pass already gives the same bytes reached through a pointer
+(`((unsigned char *)a0)[7]`) and IDA's `BYTEn`/`WORDn` macros. `T` is the type
+of the Varnode being printed when that type is exactly the access width and is
+a scalar (an integer, boolean, float, pointer or unknown of 1, 2, 4 or 8 bytes,
+or a float of its own width); otherwise it is the unknown type of the width,
+spelled by the active type speller -- except that an unknown-typed access that
+carries a float (a float operation or a copy of a float wrote it, or a float
+operation reads it) takes the float of its width, because an integer `T` would
+make C convert the value where the binary moves its bits (`*(double *)&v1[8] =
+a0 * a0;` for an AArch64 `d1:d0` pair). C has no scalar of 3, 5, 6, 7 or more than 8
+bytes, so such an access takes a byte array of its width as `T`, which is how
+kuna already prints a load of that width (`*(char (*)[7])((char *)&v24 + 1)`,
+`return *(char (*)[16])((long)a0 + 0x48);`): the width is explicit, but the
+value is no more C than the `CONCAT71`/`SUB1612` intrinsics those accesses
+appear in, and making a 16-byte value C is the container-type question above.
+A whole-array cover from `arraycoverwidth` of such a width prints the bare
+array, which states the width through its declaration.
+The member path stays inside the address-of (`((unsigned int *)&v1.flagfield)[1]`, `*(unsigned long
+*)&v11[0]`), every form is an lvalue so a partial store prints the same way, and
+the offset is still the byte offset into the symbol's storage, so the reading
+is the target's memory order whatever its endianness. The rendering is C only (the Rust
+printer keeps its own spelling) and reinterprets the variable through another
+type exactly as IDA's macros do, so recompiling it wants
+`-fno-strict-aliasing`, as decompiled C generally does. The catalog default
+stays off because the datatest corpus pins Ghidra's notation in two
+assertions and applies no mode; the presets are what make the valid spelling
+the default rendering for a real binary. Over 36 stripped decbench binaries
+under `--mode aggressive` the option replaces all 4,964 artificial members, in
+805 functions, and changes nothing else.
+
 **Leaves with no Symbol.** Not every leaf has one. When no mapped symbol covers
 the storage the leaf falls through to the upstream `pushUnnamedLocation`
 naming, `printc.rs (kuna_unnamed_location_name)`: the register name covering

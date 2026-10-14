@@ -58,3 +58,4 @@ pub mod kuna_loadorder;
 pub(crate) mod kuna_wrappedstackaggregate;
 
 pub(crate) mod kuna_callarrayextent;
+pub(crate) mod kuna_stackstruct;

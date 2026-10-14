@@ -43,6 +43,9 @@ fn wrapped_struct_spills_preserve_callback_memory_effects() {
                 "--functions".into(),
                 names.join(","),
                 "--assert-strict".into(),
+                "--option".into(),
+                "partialaccess".into(),
+                "off".into(),
             ];
             for name in ["dev", "other"] {
                 args.extend(["--assert".into(), format!("typedef struct {name} {{ void (*temp)(struct {name} *,short *);int pad[16];short t; }};")]);

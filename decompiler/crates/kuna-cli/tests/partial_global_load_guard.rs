@@ -72,6 +72,9 @@ fn partial_global_writes_reach_aliasing_loads_before_whole_writes() {
                 "--functions",
                 &selectors,
                 "--assert-strict",
+                "--option",
+                "partialaccess",
+                "off",
             ];
             for p in &PROTOTYPES {
                 args.extend(["--assert", p]);

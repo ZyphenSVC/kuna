@@ -354,6 +354,9 @@ fn decompile(input: &std::path::Path, name: &str, options: &[&str]) -> String {
             "decompile",
             input.to_str().unwrap(),
             &format!("binary_{name}"),
+            "--option",
+            "partialaccess",
+            "off",
         ])
         .args(options)
         .output()

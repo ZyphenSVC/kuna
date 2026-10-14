@@ -461,6 +461,9 @@ pub struct PrintCOptions {
     pub array_cover_width: bool,
     /// Render supported mapped byte-array transfers with standard C helpers.
     pub bytearray_c: bool,
+    /// (kuna) A partial access no member names renders as a typed pointer
+    /// access instead of `name._<off>_<size>_` (`option partialaccess`).
+    pub partial_access: bool,
     /// (kuna) A constant pointer whose readonly target spells a ZERO-character
     /// string declines the `""` literal and prints its address instead
     /// (`option emptystrconst`).
@@ -516,6 +519,7 @@ impl PrintCOptions {
             warn_inline: true, // (kuna) DIV-39; no upstream equivalent
             array_cover_width: true, // (kuna) no upstream equivalent
             bytearray_c: false,
+            partial_access: false,
             empty_str_const: true,   // (kuna) no upstream equivalent
             struct_defs: false,      // (kuna) no upstream equivalent; opt-in
             global_ref: true,        // (kuna) no upstream equivalent
@@ -8255,6 +8259,9 @@ impl PrintC {
         // arm when the trailing truncation is a SUBPIECE-style cast (`(undefined1)
         // v1.flagfield`); rendered as a leading `(cast)` before the member tokens.
         let mut finalcast: Option<std::rc::Rc<crate::dtype::Datatype>> = None;
+        // (kuna `partialaccess`) The type an artificial `._<off>_<sz>_` member was
+        // taken out of.
+        let mut unnamed_in: Option<std::rc::Rc<crate::dtype::Datatype>> = None;
 
         while let Some(cur) = ct.clone() {
             // (kuna arraycoverwidth) The upstream whole-symbol break exits the
@@ -8427,6 +8434,7 @@ impl PrintC {
                 if sz == 0 {
                     sz = cur.get_size() - off as int4;
                 }
+                unnamed_in = Some(std::rc::Rc::clone(&cur));
                 stack.push(PartialEntry::Unnamed(off, sz));
                 ct = None;
             }
@@ -8436,6 +8444,21 @@ impl PrintC {
         // cover, render bare (the caller emits the plain name).
         if stack.is_empty() && finalcast.is_none() {
             return false;
+        }
+
+        let piece = match stack.last() {
+            Some(PartialEntry::Unnamed(o, s))
+                if *s > 0 && self.options.partial_access && self.out_lang == crate::kuna_lang::OutLang::C =>
+            {
+                crate::kuna_partialaccess::Piece::plan(fd, arch, vn, op, *o, *s, sz_in == 0, unnamed_in.as_deref())
+            }
+            _ => None,
+        };
+        if piece.is_some() {
+            stack.pop();
+        }
+        if let Some(p) = &piece {
+            self.push_piece_open(p, op);
         }
 
         // A leading `(cast)` over the whole member access (Rust: a trailing
@@ -8533,7 +8556,62 @@ impl PrintC {
         if let Some(fc) = &final_cast_open {
             self.push_cast_close(fc);
         }
+        if let Some(p) = &piece {
+            self.push_piece_close(p, op);
+        }
         true
+    }
+
+    /// (kuna `partialaccess`) Open the typed pointer access that replaces a
+    /// `._<off>_<size>_` token; the symbol and its member path follow.
+    fn push_piece_open(&mut self, p: &crate::kuna_partialaccess::Piece, op: OpId) {
+        use crate::kuna_partialaccess::Form;
+        if p.form == Form::Whole {
+            return;
+        }
+        match p.form {
+            Form::Index(_) => self.push_op(&tokens::SUBSCRIPT, Some(op_key(op))),
+            Form::Base | Form::Bytes(_) | Form::Element(_) | Form::Decay | Form::Whole => {
+                self.push_op(&tokens::DEREFERENCE, Some(op_key(op)))
+            }
+        }
+        self.push_cast_open(&p.pointer, op);
+        if let (Form::Bytes(_), Some(bytes)) = (p.form, &p.bytes) {
+            self.push_op(&tokens::BINARY_PLUS, Some(op_key(op)));
+            self.push_cast_open(bytes, op);
+        }
+        match p.form {
+            Form::Decay | Form::Whole => {}
+            Form::Element(_) => {
+                self.push_op(&tokens::ADDRESSOF, Some(op_key(op)));
+                self.push_op(&tokens::SUBSCRIPT, Some(op_key(op)));
+            }
+            _ => self.push_op(&tokens::ADDRESSOF, Some(op_key(op))),
+        }
+    }
+
+    /// (kuna `partialaccess`) Close what [`Self::push_piece_open`] opened.
+    fn push_piece_close(&mut self, p: &crate::kuna_partialaccess::Piece, op: OpId) {
+        use crate::kuna_partialaccess::Form;
+        match p.form {
+            Form::Index(k) => {
+                self.push_cast_close(&p.pointer);
+                self.push_constant_ir_fmt_sign(k as uintb, 0, op, display_format::NONE, false);
+            }
+            Form::Whole => {}
+            Form::Base | Form::Decay => self.push_cast_close(&p.pointer),
+            Form::Element(k) => {
+                self.push_constant_ir_fmt_sign(k as uintb, 0, op, display_format::NONE, false);
+                self.push_cast_close(&p.pointer);
+            }
+            Form::Bytes(off) => {
+                if let Some(bytes) = &p.bytes {
+                    self.push_cast_close(bytes);
+                }
+                self.push_constant_ir_fmt_sign(off as uintb, 0, op, display_format::NONE, false);
+                self.push_cast_close(&p.pointer);
+            }
+        }
     }
 
     /// C++ `PrintC::pushAnnotation` (printc.cc:1929): render a volatile
