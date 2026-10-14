@@ -24,7 +24,8 @@
     `int main(int argc, char **argv, char **envp)` - all three arguments of the
     call glibc's `__libc_start_main` makes, because the prototype is applied
     locked and declaring two would assert that a `main` reading `envp` has no
-    third parameter.
+    third parameter. Neither `main` here reads `envp`, so the printed line
+    leaves it out (`envpelide`, pinned in `kuna-elfmain-named.xml`).
 
     Passes 3 and 4 are the same two arms over the second fixture,
     `elfmainextra_x86_64`, and they pin what the locked declaration COSTS. That
@@ -74,7 +75,7 @@ c3
 </script>
 <stringmatch name="ELFMAIN #1: off, the entry is an anonymous sub with a body-driven signature" min="1" max="1">unsigned long sub_1405\(int4 a0,unsigned long \*a1\)</stringmatch>
 <stringmatch name="ELFMAIN #2: off, the argument vector has no element type, so the string it holds is an integer" min="1" max="1">sub_1357\(a1\[1\]\)</stringmatch>
-<stringmatch name="ELFMAIN #3: default, the libc-start argument is named and declared, in both images" min="2" max="2">int4 main\(int4 argc,char \*\*argv,char \*\*envp\)</stringmatch>
+<stringmatch name="ELFMAIN #3: default, the libc-start argument is named and declared, in both images" min="2" max="2">int4 main\(int4 argc,char \*\*argv\)$</stringmatch>
 <stringmatch name="ELFMAIN #4: default, the declared element type reaches the call site" min="1" max="1">sub_1357\(argv\[1\]\)</stringmatch>
 <stringmatch name="ELFMAIN #5: off, an argument register past the third is recovered as a parameter" min="1" max="1">unsigned long sub_1026\(unsigned int a0,unsigned long a1,unsigned long a2,unsigned long a3,unsigned long a4,unsigned long a5\)</stringmatch>
 <stringmatch name="ELFMAIN #6: off, the fabricated slots are what the body forwards" min="1" max="1">sub_1050\(0x2000,a0,a1,a4\)</stringmatch>

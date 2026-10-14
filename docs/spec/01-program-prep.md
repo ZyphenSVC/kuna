@@ -3868,7 +3868,10 @@ looking for a read of the third argument register would see nothing in either
 case, and of the two mistakes only one is wrong output — an `envp` the program
 ignores is an unused parameter in a declaration that is true of every hosted C
 program, while an `envp` dropped from a program that uses it is a lie. The
-declaration the runtime actually makes is therefore the one applied.
+declaration the runtime actually makes is therefore the one applied. Only the
+printed line differs: an `envp` the decompiled body never reads is left out of
+it (`envpelide`, §9), so a program that ignores it prints
+`int main(int argc, char **argv)` while `armlibcmain_le32` keeps all three.
 
 The lock costs something in the other direction, and the corpus says how much. A
 `main` whose body reads an argument register *past* the third keeps that read
@@ -3913,12 +3916,30 @@ four bytes read as an address. So the pass additionally requires the image to na
 version suffix stripped; that is the C runtime's own name, and a fully stripped
 static image that states neither is refused rather than guessed at. It further
 refuses a non-ELF image, a recovered address equal to `_start` or outside every
-executable section, an address that already carries a function symbol — a
-non-stripped ELF names it `main` itself and that name wins through the commit's
-idempotent cross-scope probe, which is why no unstripped fixture and no parity
-assertion can move — and an image that already spells a symbol `main` anywhere,
-which would make the by-name park ambiguous in the way `retain_unambiguous_names`
-guards against in §1.7.
+executable section, and an address that already carries a function symbol other
+than `main`, whose name stays.
+
+An image that keeps its symbol table names `main` itself, and that name stays,
+but the declaration does not come with it: the symbol is a name, and a `main` whose
+body alone is read comes out `unsigned long main(int a0,void *a1)` exactly as the
+stripped one did, with `((char **)a1)[1]` where the source says `argv[1]`. Such an
+image gets the same prototype. crt1 references `main` by name and the static
+linker resolves that reference to the image's global `main`, so in an image that
+names `__libc_start_main` its defined function `main` IS the routine the runtime
+calls, whether or not oracle 4 can read `_start` (it has no i386 or MIPS arm, and a
+static-pie or musl crt1 is a different shape). The claim is refused when the image
+spells `main` more than once at different addresses, or as anything but a defined
+function, and when oracle 4 decodes a different address than the symbol's, since
+then two pieces of evidence disagree. An image with no `__libc_start_main` name is
+refused here too: a bare-metal `main` is called by a reset handler with nothing in
+its argument registers, and nothing licenses `argc`/`argv` there. This prototype
+is parked by ADDRESS, the symbol's with an ARM mode bit cleared (a Thumb `main`'s
+name sits on the odd `st_value`, so the by-name park missed it), through
+`AnalysisOutput::default_prototypes_at`, which the commit applies before every
+other prototype stream: a declaration the image states itself — DWARF's
+`int main(void)`, or its own `int main(int c, char **v)` names — replaces it. So
+on an image that keeps its symbols the change is the declaration and nothing else,
+and the stripped and unstripped builds of one program print the same signature.
 
 Naming an address a second time makes one thing visible that was latent before it:
 `--define-function <start>[-<end>]=<name>` and a discovery pass can now reach the

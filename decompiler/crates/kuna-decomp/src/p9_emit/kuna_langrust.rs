@@ -422,7 +422,7 @@ impl PrintC {
         if !proto.has_store() {
             return;
         }
-        let sz = proto.num_params();
+        let sz = proto.num_params() - crate::kuna_envpelide::hidden_params(arch, fd);
         let mut print_comma = false;
         for i in 0..sz {
             let Some(param) = proto.get_param(i) else { continue };

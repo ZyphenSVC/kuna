@@ -407,6 +407,13 @@ pub struct AnalysisOutput {
     /// emits them here instead. The libc and Win32 signature passes all use this
     /// stream for concrete resolver entries. See [`crate::protos`].
     pub prototypes_at: Vec<(u64, kuna_decomp::fspec::PrototypePieces)>,
+    /// Prototypes keyed by ENTRY ADDRESS that every other prototype stream
+    /// outranks: the commit parks them before the by-name stream, so a
+    /// declaration the image itself states (DWARF, a library table) replaces
+    /// one. `elfmain` parks the C runtime's `main` declaration here on an image
+    /// that names its own `main`, where the address is the key that reaches an
+    /// ARM Thumb function (its symbol carries the mode bit).
+    pub default_prototypes_at: Vec<(u64, kuna_decomp::fspec::PrototypePieces)>,
     /// The names a PE imports from a C runtime DLL, whose functions are `__cdecl`
     /// whatever the image's default convention is. The commit boundary declares
     /// the prototypes parked under these names with that model.
@@ -537,6 +544,7 @@ impl AnalysisOutput {
         self.fid_names.iter_mut().for_each(|f| fix(&mut f.name));
         self.prototypes.iter_mut().for_each(fix_proto);
         self.prototypes_at.iter_mut().for_each(|(_, p)| fix_proto(p));
+        self.default_prototypes_at.iter_mut().for_each(|(_, p)| fix_proto(p));
         self.cpp_dwarf.symbols.iter_mut().for_each(|s| fix(&mut s.name));
         self.cpp_dwarf.locals.iter_mut().for_each(|l| fix(&mut l.name));
         self.cpp_dwarf.prototypes.iter_mut().for_each(|(_, p)| fix_proto(p));
@@ -634,6 +642,7 @@ impl AnalysisOutput {
         self.wide_strings32.extend(other.wide_strings32);
         self.prototypes.extend(other.prototypes);
         self.prototypes_at.extend(other.prototypes_at);
+        self.default_prototypes_at.extend(other.default_prototypes_at);
         self.c_runtime_imports.extend(other.c_runtime_imports);
         self.context_paints.extend(other.context_paints);
         self.inventory_context_paints.extend(other.inventory_context_paints);

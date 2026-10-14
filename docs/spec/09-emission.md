@@ -208,6 +208,31 @@ incomplete — leaving its warning attached to whatever decoded before it. A
 `noreturn` halt keeps whatever the elision already did with it, and `option
 decodehalt off` restores both halves together.
 
+**Unread `envp` elision (P9/`naming-policy`, `option envpelide`, default ON).**
+`elfmain` (§1) declares `main` the way the C runtime calls it,
+`int main(int argc, char **argv, char **envp)`, and applies it locked, since two
+parameters would assert there is no third and delete a live `envp` from a
+`main` that forwards it. Most programs never read it, and their source says
+`int main(int argc, char **argv)`. `kuna_envpelide.rs (hidden_params)` lets the
+printed declaration leave the third parameter out while analysis keeps all
+three: `printc.rs (PrintC::emit_prototype_inputs)`, its Rust counterpart and
+the `decompile-all --json` parameter list
+(`decompile_drive.rs (extract_variables)`) all stop one parameter short. The
+declaration qualifies when the function is named `main`, its prototype is
+locked and not variadic, it has exactly three inputs, and the third is named
+`envp` and typed a pointer to a pointer to a byte. `envp` is read when the
+function's incoming value at that storage reaches any op other than the
+`INDIRECT` copies calls make of it and the `MULTIEQUAL` joins carrying it
+(`reaches_a_reader`): gcc's i386 `main` takes the address of its argument area
+to realign the stack, so its stack-passed `envp` is carried past every call and
+read by none, while `armlibcmain_le32` hands its `r2` to `__printf_chk` and
+prints all three. A call to `main` still passes three arguments, because the
+prototype a caller copies is the parked one. A debug-info declaration spelled
+exactly the runtime's way cannot be told from `elfmain`'s and is printed the
+same; a host-owned prototype (Ghidra mode) is never touched. The stripped and
+unstripped builds of one program print the same signature
+(`tests/stages/kuna-elfmain-named.xml`); `off` prints all three.
+
 **Void tail-return elision (P9/`brace-form`, `option voidtailreturn`, default
 OFF).** kuna prints the function's final `CPUI_RETURN` unconditionally, so a void
 function ends `... }` / `return;` / `}` — a statement the C source it was compiled

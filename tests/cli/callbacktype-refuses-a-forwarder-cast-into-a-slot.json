@@ -6,6 +6,9 @@
     "decompile-all",
     "{{BIN}}",
     "--option",
+    "elfmain",
+    "off",
+    "--option",
     "callbacktype",
     "on"
   ],
@@ -40,5 +43,5 @@
     ]
   },
   "notes": "cmp3 takes three arguments and is cast into qsort's two-argument slot; it forwards the third to memcmp in a tail call. Parking the slot drops the third argument at the direct call. cmp3 keeps its three parameters and, since the direct call prints its result, returns memcmp's int.",
-  "probe_id": "p-95133a915bab"
+  "probe_id": "p-45ce1004b9b2"
 }

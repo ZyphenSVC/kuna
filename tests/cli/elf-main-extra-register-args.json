@@ -39,7 +39,7 @@
       {
         "path": "functions[0].code",
         "op": "contains",
-        "value": "int main(int argc,char **argv,char **envp)"
+        "value": "int main(int argc,char **argv)"
       },
       {
         "path": "functions[0].code",
@@ -53,5 +53,5 @@
       }
     ]
   },
-  "notes": "What declaring main's real prototype costs, pinned so it stays visible. This main forwards two registers past the third that nothing writes: r8 into a call argument, r9 into a global. Body-driven recovery makes both parameters; the locked three-parameter park leaves the stored one `unsigned long v1; // r9` assigned nowhere and drops the forwarded one from the call."
+  "notes": "What declaring main's real prototype costs, pinned so it stays visible. This main forwards two registers past the third that nothing writes: r8 into a call argument, r9 into a global. Body-driven recovery makes both parameters; the locked three-parameter park leaves the stored one `unsigned long v1; // r9` assigned nowhere and drops the forwarded one from the call. The unread envp is not printed."
 }

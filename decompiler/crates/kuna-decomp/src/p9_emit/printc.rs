@@ -3049,7 +3049,7 @@ impl PrintC {
             self.emit.tag_type("void", SyntaxHighlight::TypeColor, markup);
             return;
         }
-        let sz = proto.num_params();
+        let sz = proto.num_params() - crate::kuna_envpelide::hidden_params(arch, fd);
         if sz == 0 {
             self.emit.tag_type("void", SyntaxHighlight::TypeColor, markup);
         } else {

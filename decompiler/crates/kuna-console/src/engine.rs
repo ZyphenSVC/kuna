@@ -4892,6 +4892,13 @@ fn commit_analysis_output(
         arch.symboltab.set_attribute(sid, kuna_decomp::varnode::varnode_flags::namelock);
     }
 
+    // 4b. Default prototypes bound by ENTRY ADDRESS, parked before every other
+    //     prototype stream so a declaration the image states replaces them.
+    for (addr, pieces) in out.default_prototypes_at {
+        let a = Address::new(Rc::clone(code_space), addr);
+        prog.arch_mut().set_function_prototype_pieces_at(&a, pieces);
+    }
+
     // 5. Library prototypes (the kuna analog of ApplyDataArchiveAnalyzer): park each
     //    on its named global callee. `ActionDefaultParams` later copies the callee's
     //    prototype into the caller's call spec, so the argument constants get typed

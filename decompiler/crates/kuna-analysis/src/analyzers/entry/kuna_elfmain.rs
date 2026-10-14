@@ -54,6 +54,8 @@
 //! unused parameter in a declaration that is true of every hosted C program;
 //! an `envp` dropped from a program that uses it is wrong output. So the
 //! declaration the C runtime actually makes is the one applied.
+//! The printed line leaves an `envp` the decompiled body never reads out
+//! (`envpelide`, `kuna_decomp::kuna_envpelide`); analysis keeps all three.
 //!
 //! ## What the lock costs
 //!
@@ -95,7 +97,9 @@
 //!
 //! - a non-ELF image (Mach-O is `machomain`'s, PE is
 //!   [`super::kuna_entrymainproto`]'s);
-//! - an image with no symbol spelled `__libc_start_main` at all. Oracle 4's
+//! - an image with no symbol spelled `__libc_start_main` at all, whose `main`
+//!   (if it names one) may be a bare-metal routine called with nothing in its
+//!   argument registers. Oracle 4's
 //!   x86-64 arm matches an argument-setup encoding and a following `call`, which
 //!   is evidence enough to add a function entry but not to assert that the
 //!   function is the C `main`; the C runtime's own name is what distinguishes a
@@ -103,13 +107,25 @@
 //!   image states neither;
 //! - a recovered address equal to `_start` itself, or outside every executable
 //!   section;
-//! - an address that ALREADY carries a function symbol. A non-stripped ELF names
-//!   it `main` from its own `.symtab` and that name wins, exactly as the commit
-//!   boundary's idempotent `find_function_across_scopes` probe arranges — which
-//!   is also why no unstripped fixture, and no parity assertion, can move;
-//! - an image that already defines a symbol spelled `main`, so the by-name
-//!   prototype park can never land on a different function (the ambiguity
-//!   `retain_unambiguous_names` guards against in `analyzers/protos`).
+//! - an address that already carries a function symbol other than `main`,
+//!   whose name stays.
+//!
+//! ## An image that names its own `main`
+//!
+//! A non-stripped ELF names the function `main` from its own `.symtab`, and
+//! that name wins, but the declaration did not come with it: its body alone
+//! read `unsigned long main(int a0,void *a1)`, with `((char **)a1)[1]` for
+//! `argv[1]`. crt1 references `main` by name and the static linker resolves it
+//! to the image's defined `main`, so in an image that names
+//! `__libc_start_main` that function IS the routine the runtime calls, whether
+//! or not oracle 4 can read `_start` (it has no i386 or MIPS arm). It gets the
+//! same prototype, refused where the image spells `main` at two addresses or as
+//! anything but a defined function, and where oracle 4 decodes a different
+//! address. The prototype is parked by ADDRESS (a Thumb symbol's mode bit
+//! cleared, since the by-name park lands on the odd `st_value`) through
+//! `AnalysisOutput::default_prototypes_at`, which the commit applies before
+//! every other prototype stream, so a declaration the image states itself
+//! (DWARF) replaces it.
 //!
 //! Like every other analysis pass the facts are computed at LOAD and COMMITTED
 //! only when the gate is on, so `--option elfmain off` restores the
@@ -148,10 +164,10 @@ impl AnalysisPass for ElfMainPass {
 
     fn run(&self, ctx: &AnalysisCtx) -> AnalysisOutput {
         let mut out = AnalysisOutput::default();
-        let Some((vma, named_here)) = main_claim(ctx.file, ctx.bytes) else {
+        let Some((vma, source)) = main_claim(ctx.file, ctx.bytes) else {
             return out;
         };
-        if named_here {
+        if source == Source::Decoded {
             // The name rides the `entry_names` overlay, which the commit consults
             // for VMAs in `entries`. Oracle 4 already discovers this address, but
             // emitting it here too keeps the name from silently evaporating if
@@ -160,73 +176,113 @@ impl AnalysisPass for ElfMainPass {
             out.entry_names.push((vma, MAIN.to_string()));
         }
         if let Some(pieces) = main_prototype(ctx) {
-            out.prototypes.push(pieces);
+            // An image's own `main` takes the declaration by address, under any
+            // the image states itself; the name this pass or `armlibcmain`
+            // installs takes it by that name, so the entry stays that pass's.
+            match source {
+                Source::Symbol => out.default_prototypes_at.push((vma, pieces)),
+                Source::Decoded | Source::ArmLibcMain => out.prototypes.push(pieces),
+            }
         }
         out
     }
 }
 
+/// Where the address of the claimed `main` came from, which decides who names it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Source {
+    /// Oracle 4's decode of `_start`; this pass names it.
+    Decoded,
+    /// [`super::kuna_armlibcmain`], which names it.
+    ArmLibcMain,
+    /// The image's own symbol `main`.
+    Symbol,
+}
+
 /// The VMA crt1 hands `__libc_start_main`, once every refusal in the module
-/// header has been applied, paired with whether THIS pass is the one that names
-/// it (false when the address came from [`super::kuna_armlibcmain`], which owns
-/// the entry and the name). `None` means this pass contributes nothing and the
-/// commit is byte-identical to before.
-fn main_claim(file: &object::File, bytes: &[u8]) -> Option<(u64, bool)> {
+/// header has been applied, with where it came from. `None` means this pass
+/// contributes nothing and the commit is byte-identical to before.
+fn main_claim(file: &object::File, bytes: &[u8]) -> Option<(u64, Source)> {
     if file.format() != object::BinaryFormat::Elf {
         return None;
     }
-    // Both refusals come off one pass over the symbol names, and both are
-    // cheaper than the decode and the section scans below -- on a large image
-    // that already names its own `main` this is the whole cost of the pass.
-    let (names_runtime, names_main) = scan_runtime_names(file);
-    if !names_runtime || names_main {
+    // One pass over the symbol names, cheaper than the decode below.
+    let (names_runtime, main_symbol) = scan_runtime_names(file);
+    if !names_runtime {
         return None;
     }
     let entry = file.entry();
-    let (vma, named_here) = match super::libc_start_main_target(file, entry) {
-        Some(vma) => (vma, true),
+    let decoded = match super::libc_start_main_target(file, entry) {
+        Some(vma) => Some((vma, Source::Decoded)),
         // The non-PIE ARM32 shape oracle 4's relocation cross-check cannot see.
         // That pass emits the entry and the name; only the prototype is added
         // here, and it is inert unless `armlibcmain` is on to install the `main`
         // it parks on.
-        None => (super::kuna_armlibcmain::main_vma(file, bytes)?, false),
+        None => super::kuna_armlibcmain::main_vma(file, bytes).map(|vma| (vma, Source::ArmLibcMain)),
+    };
+    let (vma, source) = match main_symbol {
+        MainSymbol::Ambiguous => return None,
+        // The link resolved crt1's reference to `main` to this symbol, so it is
+        // the routine `__libc_start_main` calls whether or not the decode above
+        // could read `_start`; a decode that names a different address is
+        // conflicting evidence, and nothing is claimed.
+        MainSymbol::At(symbol) => match decoded {
+            Some((vma, _)) if vma != symbol => return None,
+            _ => (symbol, Source::Symbol),
+        },
+        MainSymbol::Absent => decoded?,
     };
     if vma == 0 || vma == entry & !1 {
         return None;
     }
-    if !in_executable_section(&executable_sections(file), vma) {
-        return None;
+    if !matches!(main_symbol, MainSymbol::At(_)) {
+        if !in_executable_section(&executable_sections(file), vma) {
+            return None;
+        }
+        // A named entry has a better name coming from whatever named it.
+        if existing_function_addrs(file, bytes).binary_search(&vma).is_ok() {
+            return None;
+        }
     }
-    // A named entry has a better name coming from whatever named it, and an image
-    // that already spells a symbol `main` would make the by-name prototype park
-    // ambiguous.
-    if existing_function_addrs(file, bytes).binary_search(&vma).is_ok() {
-        return None;
-    }
-    Some((vma, named_here))
+    Some((vma, source))
 }
 
-/// `(the image names __libc_start_main, the image names main)`, from one pass
-/// over the static and dynamic symbol names.
+/// What an image's symbol tables say about a function spelled `main`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MainSymbol {
+    /// Nothing is spelled `main`.
+    Absent,
+    /// Every symbol spelled `main` is a defined function at this one address
+    /// (Thumb bit cleared), so the by-name prototype park can only land there.
+    At(u64),
+    /// Two addresses, an undefined reference, or a `main` that is not a
+    /// function: the by-name park could land on the wrong one.
+    Ambiguous,
+}
+
+/// `(the image names __libc_start_main, what it says about main)`, from one
+/// pass over the static and dynamic symbol names.
 ///
 /// The first is the evidence that `_start` really is a glibc crt1, and so that
 /// its first argument is `main` rather than whatever a hand-rolled entry point
-/// puts in that register. The second is what would make the by-name prototype
-/// park ambiguous, and it is also how a non-stripped ELF says it has a better
-/// name for this address already. The GNU version suffix is stripped because a
-/// versioned import spells the name `__libc_start_main@GLIBC_2.34`.
-fn scan_runtime_names(file: &object::File) -> (bool, bool) {
+/// puts in that register. The second is how a non-stripped ELF says which
+/// function that is. The GNU version suffix is stripped because a versioned
+/// import spells the name `__libc_start_main@GLIBC_2.34`.
+fn scan_runtime_names(file: &object::File) -> (bool, MainSymbol) {
     let mut runtime = false;
-    let mut main = false;
+    let mut main = MainSymbol::Absent;
     for sym in file.symbols().chain(file.dynamic_symbols()) {
         let Ok(name) = sym.name_bytes() else { continue };
         if name == MAIN.as_bytes() {
-            main = true;
+            let defined = !sym.is_undefined() && sym.kind() == object::SymbolKind::Text;
+            let addr = super::thumb_masked(file, sym.address());
+            main = match main {
+                MainSymbol::Absent if defined && addr != 0 => MainSymbol::At(addr),
+                MainSymbol::At(seen) if defined && seen == addr => main,
+                _ => MainSymbol::Ambiguous,
+            };
         } else if !runtime && crate::loader::elf_plt::strip_version(name) == LIBC_START_MAIN {
             runtime = true;
-        }
-        if runtime && main {
-            break;
         }
     }
     (runtime, main)
@@ -263,7 +319,7 @@ mod tests {
         std::fs::read(&path).unwrap_or_else(|_| panic!("read fixture {path}"))
     }
 
-    fn claim(name: &str) -> Option<(u64, bool)> {
+    fn claim(name: &str) -> Option<(u64, Source)> {
         let bytes = fixture(name);
         let file = object::File::parse(bytes.as_slice()).unwrap_or_else(|e| panic!("{name}: {e}"));
         main_claim(&file, bytes.as_slice())
@@ -275,42 +331,48 @@ mod tests {
     #[test]
     fn claims_the_libc_start_main_argument_of_a_stripped_elf() {
         // PIE: `lea rdi,[rip+0x286]` at 0x1178.
-        assert_eq!(claim("stripped_dynamic_x86_64"), Some((0x1405, true)));
+        assert_eq!(claim("stripped_dynamic_x86_64"), Some((0x1405, Source::Decoded)));
         // ET_EXEC: `mov rdi,0x40137a` at 0x401188.
-        assert_eq!(claim("eh_lsda_x86_64"), Some((0x40137a, true)));
+        assert_eq!(claim("eh_lsda_x86_64"), Some((0x40137a, Source::Decoded)));
     }
 
     /// The same decode on the other three architectures oracle 4 covers, so the
     /// pass is not an x86-64 feature with three dead arms.
     #[test]
     fn claims_it_on_every_architecture_oracle_4_decodes() {
-        assert_eq!(claim("entrymain_aarch64"), Some((0x714, true)));
-        assert_eq!(claim("entrymain_riscv64"), Some((0x608, true)));
-        assert_eq!(claim("entrymain_arm"), Some((0x4d8, true)));
+        assert_eq!(claim("entrymain_aarch64"), Some((0x714, Source::Decoded)));
+        assert_eq!(claim("entrymain_riscv64"), Some((0x608, Source::Decoded)));
+        assert_eq!(claim("entrymain_arm"), Some((0x4d8, Source::Decoded)));
     }
 
     /// The fixture that carries the cost documented in the module header: a
     /// `main` reading argument registers past the third still claims this pass.
     #[test]
     fn claims_a_main_that_reads_registers_past_the_third() {
-        assert_eq!(claim("elfmainextra_x86_64"), Some((0x1026, true)));
+        assert_eq!(claim("elfmainextra_x86_64"), Some((0x1026, Source::Decoded)));
     }
 
     /// The non-PIE ARM32 shape oracle 4 cannot see: `armlibcmain` owns the entry
     /// and the name, so only the prototype is contributed here.
     #[test]
     fn contributes_only_the_prototype_on_the_non_pie_arm_shape() {
-        assert_eq!(claim("armlibcmain_le32"), Some((0x103dc, false)));
-        assert_eq!(claim("armlibcmain_got_le32"), Some((0x10518, false)));
+        assert_eq!(claim("armlibcmain_le32"), Some((0x103dc, Source::ArmLibcMain)));
+        assert_eq!(claim("armlibcmain_got_le32"), Some((0x10518, Source::ArmLibcMain)));
     }
 
-    /// The guard that keeps this from overwriting better knowledge: the
-    /// un-stripped image names that address `main` itself, and the pass refuses
-    /// — which is why no unstripped-ELF expectation anywhere can move.
+    /// An un-stripped image names `main` itself, and that name stays: the pass
+    /// contributes only the prototype, on the symbol the link resolved crt1's
+    /// reference to, whether or not oracle 4 can read `_start`.
     #[test]
-    fn defers_to_an_image_that_names_its_own_main() {
-        assert_eq!(claim("fmt_x86_64"), None, "ET_EXEC, not stripped");
-        assert_eq!(claim("cet_pie_x86_64"), None, "PIE, not stripped");
+    fn declares_an_image_that_names_its_own_main() {
+        assert_eq!(claim("fmt_x86_64"), Some((0x401136, Source::Symbol)), "ET_EXEC, not stripped");
+        assert_eq!(claim("cet_pie_x86_64"), Some((0x1405, Source::Symbol)), "PIE, not stripped");
+        assert_eq!(claim("fmt_aarch64"), Some((0x754, Source::Symbol)), "AArch64 PIE");
+        assert_eq!(claim("plt_aarch64"), Some((0x400604, Source::Symbol)), "AArch64 ET_EXEC");
+        assert_eq!(claim("fmt_arm"), Some((0x504, Source::Symbol)), "Thumb PIE, the symbol's mode bit cleared");
+        assert_eq!(claim("fmt_riscv64"), Some((0x668, Source::Symbol)), "RISC-V PIE");
+        assert_eq!(claim("i386_pie_nl"), Some((0x1190, Source::Symbol)), "i386 PIE, which oracle 4 does not decode");
+        assert_eq!(claim("mips_gp_le32"), Some((0x400704, Source::Symbol)), "MIPS, which oracle 4 does not decode");
     }
 
     /// Structurally inert off ELF, and on an ELF that never names the C runtime

@@ -2356,7 +2356,7 @@ pub fn extract_variables(arch: &Architecture, fd: &Funcdata) -> Vec<VarInfo> {
 
     // 1) Parameters, in ABI order, off the FuncProto.
     let proto = fd.get_func_proto();
-    let nparams = proto.num_params();
+    let nparams = proto.num_params() - crate::kuna_envpelide::hidden_params(arch, fd);
     let mut arg_pos = 0usize;
     for i in 0..nparams {
         let Some(p) = proto.get_param(i) else { continue };

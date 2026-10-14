@@ -40,6 +40,7 @@ pub mod kuna_armregistershift; // (kuna) defined C for ARM register-controlled L
 mod kuna_armconstantshift;
 pub mod kuna_emptystrconst;
 pub mod kuna_truncarg;
+pub mod kuna_envpelide; // (kuna) an unread envp left out of main's printed declaration
 pub mod kuna_pointerargs; // (kuna) a scalar's address passed to a character-pointer parameter
 pub mod kuna_castimplied; // (kuna) casts C's own conversions already perform
 pub mod kuna_castternary; // (kuna) a conditional arm keeps no cast the conditional performs

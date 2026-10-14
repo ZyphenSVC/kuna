@@ -1383,6 +1383,12 @@ pub struct Architecture {
     /// one op across several leaves, and suppressing by identity would delete
     /// genuine mid-body early returns).
     pub voidtailreturn: bool,
+    /// (kuna `envpelide`) Leave an unread `envp` out of the printed declaration
+    /// of `main` when its locked prototype is the C runtime's three-argument
+    /// call (`elfmain`'s). Analysis keeps all three parameters; only the
+    /// declaration line and the reported parameter list change. See
+    /// [`crate::kuna_envpelide`].
+    pub envpelide: bool,
     /// (kuna `castimplied`) Leave out a cast C's own conversion rules already
     /// perform: a value-preserving integer widening passed to a trusted
     /// parameter, assigned to or returned as exactly its type, or stacked under
@@ -1713,10 +1719,11 @@ pub struct Architecture {
     /// guess (the value is consumed outside the image) and the two slots exist
     /// only because this `main` happens to read them. The declaration is applied
     /// LOCKED, so a body-driven parameter in a register past the third is not
-    /// kept. ELF only, refused on an image that names no
-    /// `__libc_start_main`, on an address that already carries a function symbol,
-    /// and on one whose image already spells a symbol `main`. Off restores the
-    /// `sub_<addr>` / width-only form exactly.
+    /// kept. An image that names its own `main` keeps the name and gets the
+    /// declaration. ELF only, refused on an image that names no
+    /// `__libc_start_main` and on an address that carries a function symbol
+    /// other than `main`. Off restores the `sub_<addr>` / width-only form
+    /// exactly.
     pub analysis_elfmain: bool,
     /// (kuna) Reject a discovered function entry that falls strictly inside a
     /// single-function `.eh_frame` FDE body (`fdeinterior`); default **on**.
@@ -2857,6 +2864,7 @@ impl Architecture {
             byte_honest: false, // (kuna) option bytehonest; reset_defaults sets the shipped default
             slot_ptr: false, // (kuna) option slotptr; reset_defaults sets the shipped default
             voidtailreturn: false, // (kuna) option voidtailreturn; reset_defaults sets the shipped default
+            envpelide: false, // (kuna) option envpelide; reset_defaults sets the shipped default
             cast_implied: false, // (kuna) option castimplied; reset_defaults sets the shipped default
             cast_sign: false, // (kuna) option castsign; reset_defaults sets the shipped default
             cast_ternary: false, // (kuna) option castternary; reset_defaults sets the shipped default
@@ -3191,6 +3199,7 @@ impl Architecture {
         self.slot_ptr = true; // (kuna) option slotptr default-on: JSON-surface only (no p-code, no emitted C), so the 675-assertion datatest corpus cannot observe it; evidence in docs/features/slotptr/default-on-evaluation.md
         self.byte_honest = true; // (kuna) default-on: JSON-surface only (no p-code, no emitted C), so the 675-assertion datatest corpus cannot observe it; measured +10 type_match-perfect / 121 improved / 0 worse over 5,298 scored decbench functions
         self.voidtailreturn = false; // (kuna) option voidtailreturn; default-OFF until its corpus bidirectional sweep is recorded in a DIV row
+        self.envpelide = true; // (kuna) option envpelide default-on: changes only the printed declaration of a `main` whose locked prototype is the C runtime's three-argument call and whose body never reads `envp`
         self.cast_implied = true; // (kuna) option castimplied default-on: leaves out only a value-preserving integer conversion C performs itself (argument to a type-locked parameter, assignment to a local or parameter declared that spelling, return, or under another conversion); 1/675 datatest assertion moved (Union #26, the intended form, pinned to upstream by a per-test opt-out), 10 stage assertions moved to the new form, speed within budget; docs/features/castimplied/default-on-evaluation.md
         self.cast_sign = true; // (kuna) option castsign default-on: a frame local or pointer index only ever compared signed, never an operand of + - * <<, and never met by a top-bit constant in == != & | ^, is declared signed; 0/675 datatest assertions and 0 stage assertions moved, test-cli unchanged, the 444-slice typesweep identical, casts 38,703 -> 38,602 on the census corpus, 41 functions fewer and 0 more; docs/features/castsign/default-on-evaluation.md
         self.cast_ternary = true; // (kuna) option castternary default-on (provisional; see docs/features/castternary)

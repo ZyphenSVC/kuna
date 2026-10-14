@@ -1,0 +1,85 @@
+<decompilertest>
+<binaryimage arch="x86:LE:64:default:gcc">
+<!--
+    `main` gets the C runtime's declaration whether the image names it or not
+    (`option elfmain on|off`), and an `envp` the body never reads is left out
+    of the printed declaration (`option envpelide on|off`, both default on).
+
+    The XML wrapper only provides the harness architecture; every pass loads
+    an in-tree ELF through the CLI's own loader. `elfmainnamed_x86_64` is a
+    gcc -O2 PIE whose `main` reads `argc` and `argv[1]` and never `envp`
+    (source beside it); `elfmainnamed_stripped_x86_64` is the same image
+    stripped, so the same `main` is reached through crt1's
+    `_start` -> `__libc_start_main` decode instead of its own symbol.
+
+    Pass 1 (`elfmain off`, unstripped) reproduces the defect: the symbol names
+    the function `main`, but its declaration is whatever its body alone
+    yields, an unsigned return and two anonymous slots, the second a struct
+    whose fields are `argv[0]` and `argv[1]`.
+
+    Passes 2 and 3 (the defaults, unstripped and stripped) print the same
+    signature: `int main(int argc, char **argv)`, with `argv[1]` read as an
+    element of the argument vector. The declaration analysis applies is the
+    runtime's three-argument call, locked; only the printed line leaves the
+    unread third argument out.
+
+    Passes 4 and 5 (`envpelide off`) print all three arguments for both
+    builds. Pass 6 is the ARM fixture `armlibcmain_le32`, whose `main`
+    forwards its third argument register to `__printf_chk`: there `envp` is
+    read, so the default prints it.
+-->
+<bytechunk space="ram" offset="0x100000" readonly="true">
+c3
+</bytechunk>
+<symbol space="ram" offset="0x100000" name="harness_stub"/>
+</binaryimage>
+<script>
+  <com>clear architecture</com>
+  <com>load file decompiler/crates/kuna-analysis/tests/fixtures/elfmainnamed_x86_64</com>
+  <com>option elfmain off</com>
+  <com>read symbols</com>
+  <com>load function main</com>
+  <com>decompile</com>
+  <com>print C</com>
+  <com>clear architecture</com>
+  <com>load file decompiler/crates/kuna-analysis/tests/fixtures/elfmainnamed_x86_64</com>
+  <com>read symbols</com>
+  <com>load function main</com>
+  <com>decompile</com>
+  <com>print C</com>
+  <com>clear architecture</com>
+  <com>load file decompiler/crates/kuna-analysis/tests/fixtures/elfmainnamed_stripped_x86_64</com>
+  <com>read symbols</com>
+  <com>load function main</com>
+  <com>decompile</com>
+  <com>print C</com>
+  <com>clear architecture</com>
+  <com>load file decompiler/crates/kuna-analysis/tests/fixtures/elfmainnamed_x86_64</com>
+  <com>option envpelide off</com>
+  <com>read symbols</com>
+  <com>load function main</com>
+  <com>decompile</com>
+  <com>print C</com>
+  <com>clear architecture</com>
+  <com>load file decompiler/crates/kuna-analysis/tests/fixtures/elfmainnamed_stripped_x86_64</com>
+  <com>option envpelide off</com>
+  <com>read symbols</com>
+  <com>load function main</com>
+  <com>decompile</com>
+  <com>print C</com>
+  <com>clear architecture</com>
+  <com>load file decompiler/crates/kuna-analysis/tests/fixtures/armlibcmain_le32</com>
+  <com>read symbols</com>
+  <com>load function main</com>
+  <com>decompile</com>
+  <com>print C</com>
+  <com>quit</com>
+</script>
+<stringmatch name="ELFMAINNAMED #1: off, a symbol-named main keeps the declaration its body yields" min="1" max="1">uint4 main\(int4 a0,struct_0 \*a1\)</stringmatch>
+<stringmatch name="ELFMAINNAMED #2: off, the argument vector is a struct and argv[1] a field of it" min="1" max="1">score\(a1-&gt;field_0x8\)</stringmatch>
+<stringmatch name="ELFMAINNAMED #3: default, the unstripped and the stripped build print the same signature, without the unread envp" min="2" max="2">int4 main\(int4 argc,char \*\*argv\)$</stringmatch>
+<stringmatch name="ELFMAINNAMED #4: argv[1] reads as an element of argv in the unstripped build, whatever envp prints" min="2" max="2">score\(argv\[1\]\)</stringmatch>
+<stringmatch name="ELFMAINNAMED #5: and in the stripped one" min="2" max="2">sub_11d0\(argv\[1\]\)</stringmatch>
+<stringmatch name="ELFMAINNAMED #6: envpelide off prints the runtime's three arguments for both builds, and the default prints them where envp is read" min="3" max="3">int4 main\(int4 argc,char \*\*argv,char \*\*envp\)</stringmatch>
+<stringmatch name="ELFMAINNAMED #7: the envp the default keeps is the one the body forwards" min="1" max="1">__printf_chk\(2,"kuna armlibcmain prompt",envp,0\);</stringmatch>
+</decompilertest>
