@@ -3781,6 +3781,28 @@ tier = "core"
 symptoms = "a call to a function in the same binary prints with no argument although the argument register is loaded right before the CALL|f() is called where the same output declares f(int)|the argument register is compared or branched on just before the CALL and the argument disappears|a value returned on one path and passed to a tail call on the other loses the argument|return ext() + 1 where the disassembly loads edi just before call ext"
 
 [[settable]]
+option = "pushpadread"
+values = "on|off"
+default = "on"
+destructive = false
+phase = "P4"
+subphase = "active-input-trial-scoring"
+strength = "HARD"
+rewind = "P4"
+issue = "kuna-pushpadread"
+summary = "Do not count a register the callee only pushes for its next call as a read of that register when `calleereadarg` asks whether the callee's body consumes it. x86 compilers align an odd number of stack arguments by pushing whatever register is at hand first (gcc 9 at -O2, and gcc 11 at -Os: `push %rdx` before pushing three bytes for `__snprintf_chk`), and that push copies a register the body never set. The bounded entry decode `calleedeadarg` takes of every direct callee recorded it as a read of `rdx`, so `calleereadarg` gave every caller's call a third argument the callee never takes, printing whatever the caller last left in `rdx`: `show(p,cells)` came out `show(p,cells,end)`. The decode now follows each push of a single register: a push whose path goes on to read the stack back (a pop, a load through the stack pointer, a return, the stack pointer copied or offset into another register) or leaves for code the walk cannot name (an indirect branch, a user op, an undecodable instruction) still counts as a read; at a call, the walk reads up to sixteen instructions of straight-line code after it, and a push the stack pointer moves back past there with nothing having read it is left out (under a Ghidra host, where each decode is a round trip, that code is not read and the push counts). Only `calleereadarg`'s question changes; the dead-argument veto and every other consumer of the decode read it as before. The judgment it makes: a register the callee passes on as a stack argument of that next call (a seventh integer argument on x86-64 SysV) is a real read the decode can no longer tell from the pad, so `calleereadarg` does not supply it either."
+use_when = "On by default. Flip off if a call to a same-binary callee loses an argument the callee passes straight on as a stack argument of its own next call (on x86-64 SysV, the seventh integer argument of that call or later), which is the one real read this leaves out. Keep it on when a call prints one argument too many, the extra one being a value the caller computed for something else, and the callee pushes that register, unset, right before pushing the stack arguments of a variadic call."
+example = "option pushpadread off"
+live_field = "push_pad_read"
+live_true = "on"
+live_false = "off"
+source_decompiler = "kuna"
+inspiration = "a gcc 9 -O2 image whose `display(img, pixels)` call printed a third argument because `display` pushes an unset `rdx` to align `__snprintf_chk`'s three stack arguments; gcc 11 -Os emits the same pad"
+change_kind = "correctness-fix"
+tier = "core"
+symptoms = "a call to a same-binary function prints one argument more than the callee takes|the extra call argument is a value the caller computed for a loop bound or comparison|the callee pushes an unset rdx before pushing the stack arguments of snprintf"
+
+[[settable]]
 option = "hiddenretarg"
 values = "on|off"
 default = "on"

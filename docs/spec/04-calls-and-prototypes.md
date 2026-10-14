@@ -1661,6 +1661,34 @@ classified:
   extern in a relocatable object, a PLT import with no library prototype) gives
   no evidence and changes nothing. `off` leaves every list as the other rules
   settle it.
+
+  A register the callee only pushes for its next call is no read either
+  (`pushpadread`, default-on, `decompiler/crates/kuna-decomp/src/p4_calls/kuna_calleedeadarg.rs (settle_after_call)`).
+  x86 compilers align an odd number of stack arguments by pushing whatever
+  register is at hand before them: gcc 9 at -O2 and gcc 11 at -Os push an
+  `rdx` the body never set ahead of three bytes for `__snprintf_chk`. The push
+  copies the register, so the walk recorded a read of `rdx` and every caller's
+  call gained a third argument, whatever the caller last left in `rdx` (a loop
+  bound, an end pointer); where that was the caller's own incoming `rdx`, the
+  caller gained a parameter as well. The walk now follows each push of a
+  register as a stack slot, at its offset from the stack pointer: a later load
+  that overlaps the slot (a `pop`, a `mov` from the stack, the `ret` of a
+  push-and-return), a use of the stack pointer it cannot place (copied into
+  another register, offset into one, stored, realigned), or a path leaving for
+  code it cannot name counts the push as a read, as before. At a call, the
+  slots that rise without a gap from the return address are the call's stack
+  arguments; the walk reads up to sixteen instructions of straight-line code
+  after the call, and a slot the stack pointer moves back past with nothing
+  having read it was never read by this body, so its push is left out of the
+  bytes this rule asks about. Any branch, call or return first, or the end of
+  that budget, counts it. `push %rdx; call f; pop %rdx` keeps its read; the
+  pad does not. Under a Ghidra host, where every decode is a round trip, the
+  code after the call is not read and every push counts as before. The judgment it makes is the callee itself: a callee that
+  passes its own register on as the call's stack argument (a seventh integer
+  argument on x86-64 SysV) reads it through that callee, and the walk cannot
+  tell that slot from the pad, so the rule does not supply it. Only this rule's
+  question changes; the dead-argument veto and every other reader of the walk
+  see every push as a read. `off` counts every push again.
 - A definitely-unused trial has its dataflow **freed immediately** — the CALL
   input is replaced with constant 0 so dead-code elimination can reap the
   producer. This is why P4 must iterate with DCE inside mainloop.

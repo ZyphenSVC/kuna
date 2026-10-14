@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    2846,
-    2846
+    2853,
+    2853
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -900,7 +900,7 @@
     "data:KUNA-CATALOG #12: scalar ARM inputs are a default-off opt-in",
     "data:KUNA-CATALOG #13: validated ARM frames are default-off",
     "data:KUNA-CATALOG #14: validated ARM frames are explicitly enabled",
-    "data:KUNA-CATALOG #15: 296 registry rows plus six individual queries",
+    "data:KUNA-CATALOG #15: 297 registry rows plus six individual queries",
     "data:KUNA-CATALOG #16: standard C byte-array rendering is explicitly opt-in",
     "data:KUNA-CATALOG #17: standard C byte-array rendering exposes its live state",
     "data:KUNA-CATALOG #1: compareform documented with its post-DIV-2 default and P3 address",
@@ -1356,6 +1356,13 @@
     "data:PROTORANGES HOMESLOT #4: on, the same local is passed to consume",
     "data:PUSHIMMEDIATERET #1: both arms preserve the unpacker call",
     "data:PUSHIMMEDIATERET #2: only option on emits the complete tail-transfer statement",
+    "data:PUSHPADREAD #1: off, the pad push reads as an argument the call passes on",
+    "data:PUSHPADREAD #2: off, the caller gains a parameter that only feeds the phantom argument",
+    "data:PUSHPADREAD #3: default, the call passes the two arguments the callee takes",
+    "data:PUSHPADREAD #4: default, the caller keeps its two parameters",
+    "data:PUSHPADREAD #5: a slot popped back after the call is a read in both arms",
+    "data:PUSHPADREAD #6: off, a slot released unread still reads as an argument",
+    "data:PUSHPADREAD #7: default, a slot released unread is no argument",
     "data:REALTYPES #1: signature uses real C types, not xunknown8",
     "data:REALTYPES #2: 1-byte stack buffer is char[8], not xunknown1[8]",
     "data:REALTYPES #3: 4-byte temp is unsigned int, not xunknown4",
